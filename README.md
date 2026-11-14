@@ -2,6 +2,8 @@
 
 An Android home screen with no icons and no grid. You type at it, and it keeps a ledger of the day.
 
+**→ [How to use SHELL](HOW-TO-USE.md)** · **[Download shell.apk](https://github.com/jere-mee-as/shell/releases/latest/download/shell.apk)**
+
 - **Top:** the numbers (unlocks, screen time, people, waiting, judgment: always 00) and a big thin clock.
 - **Middle:** the ledger. Everything you ran from here and every app session of a minute or more, time-stamped.
 - **Bottom:** chips and one line: `> say anything_`.
