@@ -1,0 +1,80 @@
+# Builds the SHELL APK and publishes it as a GitHub Release. Runs only when you press the button:
+# Actions > Release APK > Run workflow. Never on push or on a schedule.
+#
+# The release is tagged v<versionName> from android/app/build.gradle.kts. Running it again for the same
+# version replaces that release's APK. Newest release, always:
+#   https://github.com/jere-mee-as/shell/releases/latest/download/shell.apk
+#
+# Signing: one secret, SHELL_KEYSTORE_B64 (base64 of the PKCS12 keystore; backup in Proton Drive
+# Claude Things/Setup/keys). Its password and alias are below; the keystore file itself is the secret.
+# SHELL_KEYSTORE_PASSWORD / SHELL_KEY_ALIAS / SHELL_KEY_PASSWORD secrets override them if set.
+# Without SHELL_KEYSTORE_B64 the APK is debug-signed, and each build then has a different key.
+name: Release APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle.kts
+            android/gradle/libs.versions.toml
+            android/gradle/wrapper/gradle-wrapper.properties
+
+      # The runner image ships the Android SDK (ANDROID_HOME) with licences accepted; Gradle fetches the platform it needs.
+
+      - name: Decode keystore
+        env:
+          SHELL_KEYSTORE_B64: ${{ secrets.SHELL_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$SHELL_KEYSTORE_B64" ]; then
+            ks="$RUNNER_TEMP/release.p12"
+            echo "$SHELL_KEYSTORE_B64" | base64 --decode > "$ks"
+            echo "SHELL_KEYSTORE_PATH=$ks" >> "$GITHUB_ENV"
+          else
+            echo "::warning::SHELL_KEYSTORE_B64 is not set; the APK will be debug-signed."
+          fi
+
+      - name: Build release APK
+        env:
+          SHELL_KEYSTORE_PASSWORD: ${{ secrets.SHELL_KEYSTORE_PASSWORD || 'shell-key' }}
+          SHELL_KEY_ALIAS: ${{ secrets.SHELL_KEY_ALIAS || 'shell' }}
+          SHELL_KEY_PASSWORD: ${{ secrets.SHELL_KEY_PASSWORD || 'shell-key' }}
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
+
+      - name: Remove keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.p12"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ver=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          cp "$(ls app/build/outputs/apk/release/*.apk | head -n1)" "$RUNNER_TEMP/shell.apk"
+          notes="SHELL $ver (built from ${GITHUB_SHA::7}).
+
+          Install on Android: download shell.apk on the phone, open it and allow the install. Then Settings > Apps > SHELL > ⋮ > Allow restricted settings, before turning on notification access. Set it as the home app in Settings > Apps > Choose default apps > Home app."
+          if gh release view "v$ver" >/dev/null 2>&1; then
+            gh release upload "v$ver" "$RUNNER_TEMP/shell.apk" --clobber
+            gh release edit "v$ver" --notes "$notes" --latest
+          else
+            gh release create "v$ver" "$RUNNER_TEMP/shell.apk" --target "$GITHUB_SHA" --title "SHELL $ver" --notes "$notes" --latest
+          fi
